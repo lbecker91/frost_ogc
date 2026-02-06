@@ -171,12 +171,8 @@ class FrostLatestObservationSensor(SensorEntity):
             "thing_id": desc.thing_id,
             "thing_name": desc.thing_name,
             "thing_description": desc.thing_description,
-            "thing_properties": props,
-	    "thing_type": props.get("type"),          # <—
-	    "gewaesser": props.get("gewaesser"),      # optional
-	    "gemeinde": props.get("gemeinde"),        # optional
-	    "betreiber": props.get("betreiber"),      # optional
-	    # Convenience (numeric)
+            "thing_properties": desc.thing_properties or {},
+            # Convenience (numeric)
             "mh1": mh1,
             "mh2": mh2,
             "mh3": mh3,
