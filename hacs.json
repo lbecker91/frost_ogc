@@ -2,6 +2,6 @@
   "name": "FROST OGC SensorThings",
   "domain": "frost_ogc",
   "content_in_root": false,
-  "zip_release": true,
+  "zip_release": false,
   "render_readme": true
 }
