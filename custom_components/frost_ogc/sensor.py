@@ -12,15 +12,21 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 
 
-def _safe_float(v, default=None):
+def _safe_float(v: Any, default: float | None = None) -> float | None:
+    """Convert common FROST values to float.
+
+    Handles numbers, numeric strings, and strings like '347.9 m. üNN'.
+    """
     try:
         if v is None:
             return default
-        # Strings wie "140" oder "347.9 m. üNN" -> nur Zahl ziehen, falls nötig
+        if isinstance(v, (int, float)):
+            return float(v)
         if isinstance(v, str):
-            # schnelle Extraktion der ersten Zahl
             import re
-            m = re.search(r"[-+]?\d+(\.\d+)?", v.replace(",", "."))
+
+            s = v.replace(",", ".")
+            m = re.search(r"[-+]?\d+(\.\d+)?", s)
             if not m:
                 return default
             return float(m.group(0))
@@ -38,14 +44,16 @@ def _get_meldehoehen(props: dict[str, Any]) -> tuple[float | None, float | None,
 
 
 def _is_pegel(props: dict[str, Any]) -> bool:
+    """Detect if Thing describes a water level gauge (Pegel)."""
     if not props:
         return False
-    if str(props.get("type", "")).lower() == "pegel":
+
+    if str(props.get("type", "")).strip().lower() == "pegel":
         return True
-    # fallback über keywords
+
     kws = props.get("keywords") or []
-    kws_l = [str(x).lower() for x in kws]
-    return "pegel" in kws_l or "wasserstandsmessung" in kws_l
+    kws_l = [str(x).strip().lower() for x in kws]
+    return ("pegel" in kws_l) or ("wasserstandsmessung" in kws_l)
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,7 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
+    # coordinator.data contains Datastreams including expanded Thing (via $expand=Thing)
     for ds in coordinator.data:
         ds_id = ds.get("@iot.id")
         if not isinstance(ds_id, int):
@@ -104,44 +113,27 @@ async def async_setup_entry(
             thing_properties=thing_props,
         )
 
-        value_sensor = FrostLatestObservationSensor(
-            base_url=base_url,
-            session=session,
-            headers=headers,
-            auth=auth,
-            entry_id=entry.entry_id,
-            desc=desc,
-        )
-        entities.append(value_sensor)
-
-        # Zusätzlich: Stufe-Sensor nur für Pegel
-        if _is_pegel(thing_props):
-            entities.append(
-                FrostMeldehoeheLevelSensor(
-                    value_sensor=value_sensor,
-                    entry_id=entry.entry_id,
-                    desc=desc,
-                )
+        entities.append(
+            FrostLatestObservationSensor(
+                base_url=base_url,
+                session=session,
+                headers=headers,
+                auth=auth,
+                entry_id=entry.entry_id,
+                desc=desc,
             )
+        )
 
     async_add_entities(entities)
 
 
-class FrostBaseSensor(SensorEntity):
+class FrostLatestObservationSensor(SensorEntity):
+    """Shows latest Observation.result for a given FROST Datastream and exposes Thing metadata.
+
+    Additionally computes 'meldehoehe_level' (0..3) for Pegel Things based on MH1/MH2/MH3.
+    """
+
     _attr_has_entity_name = True
-
-    def _set_device_info_from_desc(self, desc: FrostDatastreamDescription):
-        if desc.thing_id is not None:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"thing_{desc.thing_id}")},
-                name=desc.thing_name or f"Thing {desc.thing_id}",
-                manufacturer="FROST",
-                model="OGC SensorThings Thing",
-            )
-
-
-class FrostLatestObservationSensor(FrostBaseSensor):
-    """Shows latest Observation.result for a given FROST Datastream and exposes Thing metadata."""
 
     def __init__(
         self,
@@ -161,10 +153,18 @@ class FrostLatestObservationSensor(FrostBaseSensor):
         self._attr_unique_id = f"{entry_id}_datastream_{desc.datastream_id}"
         self._attr_native_unit_of_measurement = desc.unit_symbol
 
-        self._set_device_info_from_desc(desc)
+        # Device = Thing (group sensors per Thing in HA)
+        if desc.thing_id is not None:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"thing_{desc.thing_id}")},
+                name=desc.thing_name or f"Thing {desc.thing_id}",
+                manufacturer="FROST",
+                model="OGC SensorThings Thing",
+            )
 
         mh1, mh2, mh3 = _get_meldehoehen(desc.thing_properties or {})
 
+        # Static metadata as attributes
         self._attr_extra_state_attributes = {
             "datastream_id": desc.datastream_id,
             "datastream_description": desc.datastream_description,
@@ -172,15 +172,19 @@ class FrostLatestObservationSensor(FrostBaseSensor):
             "thing_name": desc.thing_name,
             "thing_description": desc.thing_description,
             "thing_properties": desc.thing_properties or {},
-            # bequem direkt hochgezogen:
+            # Convenience (numeric)
             "mh1": mh1,
             "mh2": mh2,
             "mh3": mh3,
+            # Computed each update (initialized)
+            "meldehoehe_level": 0,
         }
 
+        self._is_pegel = _is_pegel(desc.thing_properties or {})
         self._attr_native_value = None
 
     async def async_update(self) -> None:
+        # Latest Observation for this datastream
         url = (
             f"{self._base_url}/Datastreams({self.entity_description.datastream_id})"
             f"/Observations?$top=1&$orderby=phenomenonTime%20desc"
@@ -196,11 +200,14 @@ class FrostLatestObservationSensor(FrostBaseSensor):
             self._attr_extra_state_attributes["observation_note"] = "no observations"
             for k in ("phenomenonTime", "resultTime", "observation_id"):
                 self._attr_extra_state_attributes.pop(k, None)
+            # level unknown -> back to 0
+            self._attr_extra_state_attributes["meldehoehe_level"] = 0
             return
 
         obs: dict[str, Any] = values[0]
         self._attr_native_value = obs.get("result")
 
+        # Observation metadata
         self._attr_extra_state_attributes.update(
             {
                 "phenomenonTime": obs.get("phenomenonTime"),
@@ -210,49 +217,20 @@ class FrostLatestObservationSensor(FrostBaseSensor):
         )
         self._attr_extra_state_attributes.pop("observation_note", None)
 
-
-class FrostMeldehoeheLevelSensor(FrostBaseSensor):
-    """Numeric sensor 0..3 representing reached Meldehöhe level based on mh1/mh2/mh3 attributes of value sensor."""
-
-    _attr_icon = "mdi:alarm-light-outline"
-
-    def __init__(self, value_sensor: FrostLatestObservationSensor, entry_id: str, desc: FrostDatastreamDescription) -> None:
-        self._value_sensor = value_sensor
-        self.entity_description = desc
-
-        # eigener Unique ID pro Datastream
-        self._attr_unique_id = f"{entry_id}_datastream_{desc.datastream_id}_meldehoehe_level"
-        self._attr_name = "Meldehöhe Stufe"
-        self._attr_native_unit_of_measurement = None
-
-        self._set_device_info_from_desc(desc)
-
-        self._attr_native_value = None
-        self._attr_extra_state_attributes = {
-            "mh1": self._value_sensor.extra_state_attributes.get("mh1"),
-            "mh2": self._value_sensor.extra_state_attributes.get("mh2"),
-            "mh3": self._value_sensor.extra_state_attributes.get("mh3"),
-        }
-
-    async def async_update(self) -> None:
-        # Wert-Sensor sollte kurz vorher aktualisiert worden sein; falls nicht, wird er von HA auch aktualisiert.
-        p = _safe_float(self._value_sensor.native_value, default=None)
-        mh1 = self._value_sensor.extra_state_attributes.get("mh1")
-        mh2 = self._value_sensor.extra_state_attributes.get("mh2")
-        mh3 = self._value_sensor.extra_state_attributes.get("mh3")
-
-        self._attr_extra_state_attributes.update({"mh1": mh1, "mh2": mh2, "mh3": mh3})
-
-        if p is None:
-            self._attr_native_value = None
-            return
-
+        # Compute meldehoehe_level (0..3) for Pegel things
         level = 0
-        if mh3 is not None and p >= mh3:
-            level = 3
-        elif mh2 is not None and p >= mh2:
-            level = 2
-        elif mh1 is not None and p >= mh1:
-            level = 1
+        if self._is_pegel:
+            p = _safe_float(self._attr_native_value, default=None)
+            mh1 = self._attr_extra_state_attributes.get("mh1")
+            mh2 = self._attr_extra_state_attributes.get("mh2")
+            mh3 = self._attr_extra_state_attributes.get("mh3")
 
-        self._attr_native_value = level
+            if p is not None:
+                if mh3 is not None and p >= mh3:
+                    level = 3
+                elif mh2 is not None and p >= mh2:
+                    level = 2
+                elif mh1 is not None and p >= mh1:
+                    level = 1
+
+        self._attr_extra_state_attributes["meldehoehe_level"] = level
