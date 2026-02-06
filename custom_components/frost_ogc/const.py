@@ -8,7 +8,7 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_TOKEN = "token"
 
-DEFAULT_SCAN_INTERVAL = 60
+DEFAULT_SCAN_INTERVAL = 600  # Sekunden
 
 AUTH_NONE = "none"
 AUTH_BASIC = "basic"

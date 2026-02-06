@@ -6,10 +6,18 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
     DOMAIN,
-    CONF_BASE_URL, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL,
-    CONF_AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN,
-    AUTH_NONE, AUTH_BASIC, AUTH_BEARER,
+    CONF_BASE_URL,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    CONF_AUTH_TYPE,
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+    AUTH_NONE,
+    AUTH_BASIC,
+    AUTH_BEARER,
 )
+
 
 def _normalize_base_url(url: str) -> str:
     return url.strip().rstrip("/")
@@ -22,9 +30,14 @@ class FrostOgcConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:
             schema = vol.Schema(
                 {
-                    vol.Required(CONF_BASE_URL, default="https://frost.feuerwehren-lkwnd.de/FROST-Server/v1.1"): str,
+                    vol.Required(
+                        CONF_BASE_URL,
+                        default="https://frost.feuerwehren-lkwnd.de/FROST-Server/v1.1",
+                    ): str,
                     vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
-                    vol.Required(CONF_AUTH_TYPE, default=AUTH_BASIC): vol.In([AUTH_NONE, AUTH_BASIC, AUTH_BEARER]),
+                    vol.Required(CONF_AUTH_TYPE, default=AUTH_BASIC): vol.In(
+                        [AUTH_NONE, AUTH_BASIC, AUTH_BEARER]
+                    ),
                 }
             )
             return self.async_show_form(step_id="user", data_schema=schema)
@@ -44,7 +57,10 @@ class FrostOgcConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._data[CONF_AUTH_TYPE] == AUTH_BEARER:
             return await self.async_step_bearer()
 
-        return self.async_create_entry(title=f"FROST ({self._data[CONF_BASE_URL]})", data=self._data)
+        return self.async_create_entry(
+            title=f"FROST ({self._data[CONF_BASE_URL]})",
+            data=self._data,
+        )
 
     async def async_step_basic(self, user_input=None) -> FlowResult:
         if user_input is None:
@@ -62,7 +78,10 @@ class FrostOgcConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_PASSWORD: user_input[CONF_PASSWORD],
             }
         )
-        return self.async_create_entry(title=f"FROST ({self._data[CONF_BASE_URL]})", data=self._data)
+        return self.async_create_entry(
+            title=f"FROST ({self._data[CONF_BASE_URL]})",
+            data=self._data,
+        )
 
     async def async_step_bearer(self, user_input=None) -> FlowResult:
         if user_input is None:
@@ -70,4 +89,7 @@ class FrostOgcConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="bearer", data_schema=schema)
 
         self._data.update({CONF_TOKEN: user_input[CONF_TOKEN]})
-        return self.async_create_entry(title=f"FROST ({self._data[CONF_BASE_URL]})", data=self._data)
+        return self.async_create_entry(
+            title=f"FROST ({self._data[CONF_BASE_URL]})",
+            data=self._data,
+        )

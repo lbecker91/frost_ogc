@@ -11,9 +11,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     DOMAIN,
-    CONF_BASE_URL, CONF_SCAN_INTERVAL,
-    CONF_AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN,
-    AUTH_NONE, AUTH_BASIC, AUTH_BEARER,
+    CONF_BASE_URL,
+    CONF_SCAN_INTERVAL,
+    CONF_AUTH_TYPE,
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+    AUTH_NONE,
+    AUTH_BASIC,
+    AUTH_BEARER,
 )
 
 PLATFORMS = ["sensor"]
@@ -31,7 +37,6 @@ def _build_auth(entry: ConfigEntry):
             entry.data.get(CONF_USERNAME, ""),
             entry.data.get(CONF_PASSWORD, ""),
         )
-
     elif auth_type == AUTH_BEARER:
         token = entry.data.get(CONF_TOKEN, "")
         headers["Authorization"] = f"Bearer {token}"
@@ -47,7 +52,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     headers, auth = _build_auth(entry)
 
     async def async_update_datastreams():
-        url = f"{base_url}/Datastreams?$top=200"
+        # Holt Datastreams + zugehöriges Thing direkt mit
+        url = f"{base_url}/Datastreams?$top=200&$expand=Thing"
         try:
             resp = await session.get(url, headers=headers, auth=auth)
             resp.raise_for_status()
